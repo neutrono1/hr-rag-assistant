@@ -49,7 +49,7 @@ if question:
 
     with st.chat_message("assistant"):
         try:
-            resp = requests.post(f"{API_URL}/query", json={"question": question}, timeout=30)
+            resp = requests.post(f"{API_URL}/query", json={"question": question}, timeout=90)
             resp.raise_for_status()
             data = resp.json()
             st.write(data["answer"])
