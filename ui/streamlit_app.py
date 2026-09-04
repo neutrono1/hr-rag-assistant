@@ -2,7 +2,7 @@ import os
 import requests
 import streamlit as st
 
-API_URL = os.getenv("API_URL", "http://localhost:8000")
+API_URL = os.getenv("API_URL", "https://hr-rag-assistant-ykuw.onrender.com")
 
 st.set_page_config(page_title="HR Policy Assistant", page_icon="📋")
 st.title("📋 HR Policy Assistant")
