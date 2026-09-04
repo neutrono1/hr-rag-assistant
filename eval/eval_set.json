@@ -1,0 +1,44 @@
+[
+  {
+    "question": "What is the casual leave carry-forward limit?",
+    "type": "direct_fact",
+    "expected_doc": "leave-policy.md",
+    "must_contain": ["8"]
+  },
+  {
+    "question": "Does the Standard health tier cover dental implants?",
+    "type": "table_lookup",
+    "expected_doc": "benefits-policy.md",
+    "must_contain": ["not covered", "not"]
+  },
+  {
+    "question": "How many privilege leave days can be carried forward?",
+    "type": "direct_fact",
+    "expected_doc": "leave-policy.md",
+    "must_contain": ["15"]
+  },
+  {
+    "question": "What is the annual LTA limit for Band C?",
+    "type": "table_lookup",
+    "expected_doc": "benefits-policy.md",
+    "must_contain": ["75,000", "75000"]
+  },
+  {
+    "question": "Can I expense a personal home gym?",
+    "type": "off_policy",
+    "expected_doc": null,
+    "must_be_refusal": true
+  },
+  {
+    "question": "What is the WFH internet stipend amount?",
+    "type": "off_policy",
+    "expected_doc": null,
+    "must_be_refusal": true
+  },
+  {
+    "question": "How long can I keep my company laptop unencrypted?",
+    "type": "off_policy_tricky",
+    "expected_doc": null,
+    "must_be_refusal": true
+  }
+]
