@@ -8,4 +8,4 @@ RUN pip install --no-cache-dir streamlit==1.38.0 requests==2.32.3
 COPY ui/ ui/
 
 EXPOSE 8501
-CMD ["streamlit", "run", "ui/streamlit_app.py", "--server.address=0.0.0.0", "--server.port=8501"]
+CMD ["sh", "-c", "streamlit run ui/streamlit_app.py --server.address=0.0.0.0 --server.port=${PORT:-8501}"]

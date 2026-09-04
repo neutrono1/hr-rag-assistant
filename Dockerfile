@@ -14,4 +14,8 @@ COPY seed.py .
 RUN python seed.py
 
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Render (and similar PaaS) inject their own $PORT and expect the app to
+# bind to it -- a hardcoded port can cause "no open ports detected" even
+# though the app started fine internally. Shell form so $PORT expands;
+# falls back to 8000 for local `docker run` / docker-compose.
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
