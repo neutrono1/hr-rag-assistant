@@ -1,39 +1,31 @@
 """
-Embeddings run locally via sentence-transformers so ingestion and
-retrieval never cost API quota. The model weights (~80MB) download once
-on first use and are cached by the library.
+Embeddings via fastembed (pure ONNX Runtime, no PyTorch dependency).
+Chosen specifically to keep the runtime memory footprint small enough
+for constrained hosting (Render free/starter tier) -- see DESIGN.md.
 """
-import os
-
-# sentence-transformers pulls in `transformers`, which by default tries
-# to import an optional TensorFlow integration. If the environment also
-# has TensorFlow + Keras 3 installed (common in Anaconda base envs from
-# unrelated projects), that import fails with a Keras-3-incompatibility
-# error even though we never use TensorFlow -- we only need the PyTorch
-# backend. Setting USE_TF=0 before the first transformers import skips
-# that code path entirely.
-os.environ.setdefault("USE_TF", "0")
-os.environ.setdefault("USE_TORCH", "1")
-
 from functools import lru_cache
 from typing import List
 
 from app.config import EMBEDDING_MODEL
 
+# fastembed's model naming differs from the sentence-transformers hub
+# path. all-MiniLM-L6-v2 maps directly; if EMBEDDING_MODEL changes,
+# confirm the equivalent name in fastembed's supported model list.
+_FASTEMBED_MODEL_MAP = {
+    "sentence-transformers/all-MiniLM-L6-v2": "sentence-transformers/all-MiniLM-L6-v2",
+}
+
 
 @lru_cache(maxsize=1)
 def _get_model():
-    from sentence_transformers import SentenceTransformer
-    return SentenceTransformer(
-        EMBEDDING_MODEL,
-        backend="onnx",
-        model_kwargs={"file_name": "onnx/model.onnx"},
-    )
+    from fastembed import TextEmbedding
+    model_name = _FASTEMBED_MODEL_MAP.get(EMBEDDING_MODEL, EMBEDDING_MODEL)
+    return TextEmbedding(model_name=model_name)
 
 
 def embed_texts(texts: List[str]) -> List[List[float]]:
     model = _get_model()
-    vectors = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+    vectors = list(model.embed(texts))
     return [v.tolist() for v in vectors]
 
 
