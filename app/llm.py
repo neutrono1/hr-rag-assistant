@@ -48,22 +48,26 @@ def _gemini_complete(system_prompt: str, user_prompt: str) -> str:
         f"https://generativelanguage.googleapis.com/v1beta/models/"
         f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
     )
-    resp = httpx.post(
-        url,
-        json={
-            "systemInstruction": {"parts": [{"text": system_prompt}]},
-            "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-            "generationConfig": {
-                "temperature": 0,
-                "responseMimeType": "application/json",
+    try:
+        resp = httpx.post(
+            url,
+            json={
+                "systemInstruction": {"parts": [{"text": system_prompt}]},
+                "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+                "generationConfig": {
+                    "temperature": 0,
+                    "responseMimeType": "application/json",
+                },
             },
-        },
-        timeout=30,
-    )
-    resp.raise_for_status()
+            timeout=30,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        raise LLMError(f"Gemini API error: {e.response.status_code} {e.response.text[:200]}")
+    except httpx.RequestError as e:
+        raise LLMError(f"Gemini request failed: {e}")
     data = resp.json()
     return data["candidates"][0]["content"]["parts"][0]["text"]
-
 
 def _ollama_complete(system_prompt: str, user_prompt: str) -> str:
     resp = httpx.post(
