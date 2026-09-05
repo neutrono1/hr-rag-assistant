@@ -7,12 +7,16 @@ with Pydantic in rag.py. If parsing fails we retry once with a stricter
 reminder before falling back to a safe refusal.
 """
 import json
+import logging
 import httpx
 
 from app.config import (
     LLM_PROVIDER, GROQ_API_KEY, GROQ_MODEL,
     GEMINI_API_KEY, GEMINI_MODEL, OLLAMA_HOST, OLLAMA_MODEL,
 )
+
+logger = logging.getLogger("app.llm")
+logging.basicConfig(level=logging.INFO)
 
 
 class LLMError(Exception):
@@ -22,23 +26,32 @@ class LLMError(Exception):
 def _groq_complete(system_prompt: str, user_prompt: str) -> str:
     if not GROQ_API_KEY:
         raise LLMError("GROQ_API_KEY is not set. See .env.example.")
-    resp = httpx.post(
-        "https://api.groq.com/openai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-        json={
-            "model": GROQ_MODEL,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "temperature": 0,
-            "response_format": {"type": "json_object"},
-        },
-        timeout=30,
-    )
-    resp.raise_for_status()
+    try:
+        resp = httpx.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+            json={
+                "model": GROQ_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0,
+                "response_format": {"type": "json_object"},
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        logger.error("Groq HTTP error: %s %s", e.response.status_code, e.response.text[:300])
+        raise LLMError(f"Groq API error: {e.response.status_code} {e.response.text[:200]}")
+    except httpx.RequestError as e:
+        logger.error("Groq request error: %s", e)
+        raise LLMError(f"Groq request failed: {e}")
     data = resp.json()
-    return data["choices"][0]["message"]["content"]
+    content = data["choices"][0]["message"]["content"]
+    logger.info("Groq raw output: %r", content[:500])
+    return content
 
 
 def _gemini_complete(system_prompt: str, user_prompt: str) -> str:
@@ -63,30 +76,44 @@ def _gemini_complete(system_prompt: str, user_prompt: str) -> str:
         )
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
+        logger.error("Gemini HTTP error: %s %s", e.response.status_code, e.response.text[:300])
         raise LLMError(f"Gemini API error: {e.response.status_code} {e.response.text[:200]}")
     except httpx.RequestError as e:
+        logger.error("Gemini request error: %s", e)
         raise LLMError(f"Gemini request failed: {e}")
     data = resp.json()
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+    content = data["candidates"][0]["content"]["parts"][0]["text"]
+    logger.info("Gemini raw output: %r", content[:500])
+    return content
+
 
 def _ollama_complete(system_prompt: str, user_prompt: str) -> str:
-    resp = httpx.post(
-        f"{OLLAMA_HOST}/api/chat",
-        json={
-            "model": OLLAMA_MODEL,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            "format": "json",
-            "stream": False,
-            "options": {"temperature": 0},
-        },
-        timeout=120,
-    )
-    resp.raise_for_status()
+    try:
+        resp = httpx.post(
+            f"{OLLAMA_HOST}/api/chat",
+            json={
+                "model": OLLAMA_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "format": "json",
+                "stream": False,
+                "options": {"temperature": 0},
+            },
+            timeout=120,
+        )
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        logger.error("Ollama HTTP error: %s %s", e.response.status_code, e.response.text[:300])
+        raise LLMError(f"Ollama API error: {e.response.status_code} {e.response.text[:200]}")
+    except httpx.RequestError as e:
+        logger.error("Ollama request error: %s", e)
+        raise LLMError(f"Ollama request failed: {e}")
     data = resp.json()
-    return data["message"]["content"]
+    content = data["message"]["content"]
+    logger.info("Ollama raw output: %r", content[:500])
+    return content
 
 
 _PROVIDERS = {
@@ -100,10 +127,17 @@ def complete_json(system_prompt: str, user_prompt: str) -> dict:
     fn = _PROVIDERS.get(LLM_PROVIDER)
     if fn is None:
         raise LLMError(f"Unknown LLM_PROVIDER '{LLM_PROVIDER}'. Choose groq | gemini | ollama.")
+
+    logger.info("Using LLM_PROVIDER=%s", LLM_PROVIDER)
     raw = fn(system_prompt, user_prompt)
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.strip("`")
-        if raw.startswith("json"):
-            raw = raw[4:]
-    return json.loads(raw)
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.strip("`")
+        if cleaned.startswith("json"):
+            cleaned = cleaned[4:]
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        logger.error("JSON parse failed: %s | cleaned text was: %r", e, cleaned[:500])
+        raise
