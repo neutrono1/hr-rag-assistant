@@ -24,7 +24,11 @@ from app.config import EMBEDDING_MODEL
 @lru_cache(maxsize=1)
 def _get_model():
     from sentence_transformers import SentenceTransformer
-    return SentenceTransformer(EMBEDDING_MODEL)
+    return SentenceTransformer(
+        EMBEDDING_MODEL,
+        backend="onnx",
+        model_kwargs={"file_name": "onnx/model.onnx"},
+    )
 
 
 def embed_texts(texts: List[str]) -> List[List[float]]:

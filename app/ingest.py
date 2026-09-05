@@ -4,7 +4,6 @@ from app.chunking import chunk_markdown
 from app.embeddings import embed_texts
 from app import store
 
-
 def ingest_text_document(filename: str, raw_text: str, replace_existing: bool = True) -> dict:
     if replace_existing:
         store.delete_document_by_filename(filename)
