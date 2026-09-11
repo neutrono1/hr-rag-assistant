@@ -5,7 +5,7 @@ import streamlit as st
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 st.set_page_config(page_title="HR Policy Assistant", page_icon="📋")
-st.title("📋 HR Policy Assistant")
+st.title("HR Policy Assistant")
 st.caption("Answers are grounded only in uploaded policy documents, with citations.")
 
 with st.sidebar:
@@ -18,6 +18,7 @@ with st.sidebar:
             resp = requests.post(f"{API_URL}/admin/documents", files=files, headers={"X-Role": "admin"})
             if resp.ok:
                 data = resp.json()
+                print("Printing the file data",data)
                 st.success(f"Indexed {data['filename']} into {data['num_chunks']} chunks.")
             else:
                 st.error(resp.json().get("detail", resp.text))

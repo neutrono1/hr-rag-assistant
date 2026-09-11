@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from typing import List
 
 from fastapi import FastAPI, UploadFile, File, Header, HTTPException
@@ -9,7 +10,14 @@ from app.ingest import ingest_text_document, ingest_pdf_document
 from app.rag import answer_question
 from app.schemas import QueryRequest, QueryResponse, DocumentInfo
 
-app = FastAPI(title="HR Policy RAG Assistant", version="1.0")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    store.init_db()
+    yield
+
+
+app = FastAPI(title="HR Policy RAG Assistant", version="1.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -19,9 +27,9 @@ app.add_middleware(
 )
 
 
-@app.on_event("startup")
-def _startup():
-    store.init_db()
+# @app.on_event("startup")
+# def _startup():
+#     store.init_db()
 
 
 def _require_admin(role: str | None):
