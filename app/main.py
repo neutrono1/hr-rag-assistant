@@ -41,8 +41,9 @@ def _require_admin(role: str | None):
 
 
 @app.get("/health")
+@app.get("/ping")
 def health():
-    return {"status": "ok"}
+    return {"status": "ok","message":"app pong"}
 
 
 @app.get("/documents", response_model=List[DocumentInfo])

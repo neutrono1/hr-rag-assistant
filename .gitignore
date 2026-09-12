@@ -6,3 +6,4 @@ data/
 .streamlit/
 *.egg-info/
 .DS_Store
+.vscode
