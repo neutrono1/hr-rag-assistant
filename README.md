@@ -9,12 +9,12 @@ and reasoning.
 ## Stack
 
 - **API**: FastAPI (Python)
-- **Embeddings**: local, free — `sentence-transformers/all-MiniLM-L6-v2` (no API key, no quota)
+- **Embeddings**: local, free — `fastembed` (pure ONNX Runtime, no PyTorch) running `sentence-transformers/all-MiniLM-L6-v2` (no API key, no quota, small memory footprint for constrained hosting)
 - **LLM**: swappable — **Groq** (default, free tier, fast) / Gemini / Ollama (fully local, no key)
 - **Store**: SQLite (documents + chunks + embeddings), brute-force cosine search
 - **UI**: Streamlit
 
-## 1. Setup (under 10 minutes)
+## 1. Local setup (under 10 minutes)
 
 ```bash
 git clone <this-repo>
@@ -34,7 +34,7 @@ cp .env.example .env
 - **Gemini** — https://aistudio.google.com/apikey → free tier → set `.env`: `LLM_PROVIDER=gemini`, `GEMINI_API_KEY=...`.
 - **Ollama (fully local, no key)** — install [Ollama](https://ollama.com), run `ollama pull llama3.1 && ollama serve`, set `.env`: `LLM_PROVIDER=ollama`.
 
-Embeddings never need a key — the first run downloads `all-MiniLM-L6-v2` (~80MB) once and caches it locally.
+Embeddings never need a key — the first run downloads the `all-MiniLM-L6-v2` ONNX weights (~80MB) via `fastembed` once and caches them locally.
 
 ## 2. Seed the sample policies and start the API
 
@@ -43,7 +43,8 @@ python seed.py                              # indexes seed_data/*.md
 uvicorn app.main:app --reload --port 8000
 ```
 
-Check it's alive: `curl http://localhost:8000/health` → `{"status":"ok"}`
+Check it's alive: `curl http://localhost:8000/health` → `{"status":"ok","message":"app pong"}`
+(`/ping` is aliased to the same handler, for platforms that health-check that path by convention.)
 
 ## 3. Run the UI
 
@@ -96,7 +97,24 @@ curl -X POST http://localhost:8000/query \
 }
 ```
 
-## 5. Run the tests / eval
+## 5. Run with Docker
+
+Two containers are provided — one for the API, one for the Streamlit UI:
+
+```bash
+cp .env.example .env    # fill in GROQ_API_KEY (or switch provider)
+docker compose up --build
+```
+
+- API: http://localhost:8000
+- UI: http://localhost:8501 (talks to the API container at `http://api:8000`)
+
+Notes:
+- `Dockerfile` runs `python seed.py` at **build time**, so a fresh image is queryable immediately with the sample policies already indexed. Uploading via `/admin/documents` at runtime still works and adds to the same index.
+- `./data` is mounted as a volume into the API container, so the SQLite DB and any uploaded raw docs persist across `docker compose down`/`up`.
+- The API container's `CMD` binds to `$PORT` if set (falling back to `8000`), so the same image deploys cleanly on PaaS platforms (e.g. Render) that inject their own port — a hardcoded port there can cause a "no open ports detected" failure even though the app is running fine internally.
+
+## 6. Run the tests / eval
 
 Unit tests (chunking logic, no server or API key needed):
 ```bash
@@ -116,10 +134,13 @@ See [`.env.example`](./.env.example) for the full list. Key ones:
 | --- | --- | --- |
 | `LLM_PROVIDER` | `groq` \| `gemini` \| `ollama` | `groq` |
 | `GROQ_API_KEY` | Groq free-tier key | — |
-| `EMBEDDING_MODEL` | Local sentence-transformers model | `all-MiniLM-L6-v2` |
+| `EMBEDDING_MODEL` | Local embedding model, resolved through `fastembed` | `sentence-transformers/all-MiniLM-L6-v2` |
 | `TOP_K` | Chunks retrieved per query | `5` |
 | `MIN_SIMILARITY` | Refuse before calling the LLM below this cosine score | `0.30` |
 | `CHUNK_TARGET_CHARS` | Target prose chunk size | `700` |
+| `DB_PATH` | SQLite file location | `data/hr_rag.sqlite3` |
+| `UPLOAD_DIR` | Where raw uploaded docs are kept | `data/raw_docs` |
+| `PORT` | (Docker/Render only) port the API binds to | `8000` |
 
 ## Notes
 

@@ -12,7 +12,7 @@
                  │  ingest.py         │
                  │  - read/decode     │
                  │  - chunk_markdown()│──▶ chunking.py (section+table aware)
-                 │  - embed_texts()   │──▶ embeddings.py (sentence-transformers, local)
+                 │  - embed_texts()   │──▶ embeddings.py (fastembed / ONNX, local)
                  └─────────┬──────────┘
                            ▼
                  ┌────────────────────┐
@@ -38,13 +38,14 @@
 ```
 
 Components:
-- **API**: FastAPI (`app/main.py`). Two real endpoints: `POST /admin/documents` (upload+index, admin-only via header) and `POST /query` (ask). Plus `GET /documents` and `GET /health`.
+- **API**: FastAPI (`app/main.py`). Two real endpoints: `POST /admin/documents` (upload+index, admin-only via header) and `POST /query` (ask). Plus `GET /documents` and `GET /health` (aliased to `GET /ping` for platforms that probe that path by convention).
 - **Chunker**: `app/chunking.py`, pure Python, no LLM involved.
-- **Embeddings**: `app/embeddings.py`, local `sentence-transformers/all-MiniLM-L6-v2` — free, no API key, works offline after the first model download.
+- **Embeddings**: `app/embeddings.py`, local, via `fastembed` (pure ONNX Runtime — no PyTorch) loading the `all-MiniLM-L6-v2` weights. Free, no API key, works offline after the first model download. `fastembed` was chosen over the `sentence-transformers` package specifically to keep the runtime memory/dependency footprint small enough for constrained hosting (e.g. Render's free/starter tier); `EMBEDDING_MODEL` keeps the `sentence-transformers/...` naming convention for readability and is resolved to the equivalent `fastembed` model internally (`_FASTEMBED_MODEL_MAP`).
 - **Store**: `app/store.py`, SQLite. Chunks and their embeddings live in one table; retrieval is a brute-force cosine scan in Python/numpy.
 - **LLM**: `app/llm.py`, a 3-way swappable client (Groq default, Gemini, Ollama) behind one `complete_json()` function.
 - **Orchestration/grounding**: `app/rag.py` — the anti-hallucination logic lives here, not in the prompt alone (see §3).
 - **UI**: `ui/streamlit_app.py`, a single-page chat + admin upload panel that talks to the API over HTTP.
+- **Deployment**: a `Dockerfile` for the API and a separate `Dockerfile.ui` for the Streamlit UI, wired together by `docker-compose.yml`. The API image runs `python seed.py` at **build time**, so a freshly built/deployed image already has the sample policies indexed and is queryable immediately — `/admin/documents` still works at runtime for adding more.
 
 Data flow is synchronous end-to-end: upload blocks until chunked+embedded+stored; a query blocks until retrieval+LLM+validation complete. This is a deliberate simplification (see §5).
 
@@ -105,6 +106,8 @@ Why this shape: the assignment requires "structured data (JSON with answer + cit
 
 **`GET /documents`** — list indexed documents with chunk counts, for the admin panel and for sanity-checking ingestion.
 
+**`GET /health` / `GET /ping`** — both return `{"status": "ok", "message": "app pong"}`. Kept as two paths since different platforms/monitors default to checking one or the other; the handler is shared so there's exactly one source of truth for "is the app up."
+
 ## 5. Trade-offs
 
 1. **Brute-force cosine search (numpy) vs. a vector DB (Chroma/pgvector).**
@@ -132,6 +135,16 @@ Why this shape: the assignment requires "structured data (JSON with answer + cit
    Rejected: a tokenizer-based length function.
    Why: avoids pulling in a tokenizer dependency (tiktoken/etc.) purely for chunk sizing, when policy prose is short and consistent enough that character count is a good-enough proxy for token count. Would need to revisit this if the assistant ever ingested very technical or non-English text where the char:token ratio varies more.
 
+6. **Embeddings runtime: `fastembed` (ONNX Runtime) vs. `sentence-transformers` (PyTorch).**
+   Chosen: `fastembed`, running the same `all-MiniLM-L6-v2` weights through ONNX Runtime.
+   Rejected: `sentence-transformers` directly.
+   Why: `sentence-transformers` pulls in PyTorch as a transitive dependency, which meaningfully increases image size and idle memory — a real constraint on free/starter-tier PaaS hosting (e.g. Render). `fastembed` produces (near-)identical embeddings for this model without that dependency. The cost is a small mapping layer (`_FASTEMBED_MODEL_MAP` in `app/embeddings.py`) to keep the human-readable `sentence-transformers/...` model name in config while resolving it to `fastembed`'s equivalent internally.
+
+7. **Baking the seed corpus into the Docker image vs. seeding only at runtime.**
+   Chosen: `Dockerfile` runs `python seed.py` during the image build.
+   Rejected: requiring a manual `docker exec ... python seed.py` (or an init container) after every deploy.
+   Why: a fresh deploy should be queryable immediately without an extra manual step, especially for a take-home reviewer. The cost is that the image build is a little slower and the seed data is effectively baked into the image layer (re-uploading via `/admin/documents` at runtime still works and uses the same replace-by-filename logic in `store.py`).
+
 ## 6. If I had two more weeks
 
 Roughly in priority order:
@@ -143,3 +156,4 @@ Roughly in priority order:
 5. **Versioning / re-indexing on replace.** Today, re-uploading a file with the same name deletes and replaces its chunks (crude versioning). I'd add an explicit version history so old citations don't silently point to language that no longer exists, and so "what changed in the last policy update" becomes answerable.
 6. **Thumbs up/down feedback**, stored per query+answer, to build a real signal for which retrieval/prompt changes actually help rather than guessing from the eval set alone.
 7. **Real auth**, replacing the hardcoded `X-Role` header with actual session-based admin/employee roles, once there's more than one admin.
+8. **Async ingestion for the Docker build-time seed step**, or at least a build cache keyed on `seed_data/`, so image builds don't re-embed the sample corpus on every unrelated code change.
